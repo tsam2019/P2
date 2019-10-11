@@ -196,7 +196,7 @@ void send_client_serverlist_response(int client_sock) {
     write(client_sock, response.c_str(), response.size() + 1);
 }
 
-bool parse_client_command(int clientSock, char* buffer, fd_set &openSockets) {
+void parse_client_command(int clientSock, char* buffer, fd_set &openSockets) {
     std::vector<std::string> tokens = stringSplit(buffer, ",");
 
     std::cout << buffer << " token len: " << tokens[0].length() << " token size: " << tokens.size() << " BOOL: " << tokens[0].compare("LISTSERVERS") << std::endl;
@@ -219,8 +219,6 @@ bool parse_client_command(int clientSock, char* buffer, fd_set &openSockets) {
     else {
         std::cout << "Unknown command from client:" << buffer << std::endl;
     }
-
-    return true;
 }
 
 //maybe bool to be consistent with recv form client
@@ -238,7 +236,7 @@ void parse_server_command(int serverSock, fd_set &openSockets, const char *buffe
         //Send some shit to tokens[1] server with the list server command
         //add repsone to list of repsonses from this server
         servers[serverSock]->group_id = tokens[1];
-        std::cout << "Fuckin ye, we listed some servers!" << std::endl;
+        std::cout << "Fuckin ye, we listed some servers!" <<  tokens[1] << std::endl;
     }
     else if(tokens[0].compare("KEEPALIVE") == 0 && (tokens.size() == 2)) {
         //Fuckin make a function that sends messages periodically to all server tokens[1] number of times
@@ -263,38 +261,38 @@ void parse_server_command(int serverSock, fd_set &openSockets, const char *buffe
     }
 }
 
+/*
 // Process command from client on the server
 bool receive_from_client(int clientSock, fd_set &openSockets) {
     char buffer[1025] = { 0 };
-    bool disconnect;
     int n;
 
-    n = read(clientSock, buffer, sizeof(buffer));
-    if (n <= 0) {
+    n = recv(clientSock, buffer, sizeof(buffer), MSG_DONTWAIT);
+    if (n == 0) {
         return false;
     } 
 
     return parse_client_command(clientSock, buffer, openSockets);
 }
+*/
 
 //Slightly less ugly function
 //Check if we are getting anything from the other server and start command process if we did.
 bool receive_from_server(int serverSock, fd_set &openSockets) {
-    std::cout << "recv from server!" << std::endl;
     std::string str;
     size_t idx = 0;
     char buffer[1025] = {0};
     int n;
 
     n = recv(serverSock, buffer, sizeof(buffer), MSG_DONTWAIT);
-    if(n <= 0){
+    if(n == 0){
         return false;
     }
 
     str = buffer;
-    parse_server_command(serverSock, openSockets, buffer);
-    return true;
-    /*
+    //parse_server_command(serverSock, openSockets, buffer);
+    //return true;
+    
     if(str[0] != '\x01') {
         return true;
     }
@@ -308,31 +306,72 @@ bool receive_from_server(int serverSock, fd_set &openSockets) {
     }
 
     return true;
-    */
 }
 
 //Handle commands coming from connected clients
 void client_commands(fd_set &openSockets, fd_set &readSockets) {
-    for(auto it = clients.cbegin(); it != clients.cend();) {
-        int sock = it->second->sock;
+    for(auto const& client : clients) {
+        int sock = client.second->sock;
         if(FD_ISSET(sock, &readSockets)) {
-            if(!receive_from_client(sock, openSockets)) {
+            char buffer[1025] = { 0 };
+            int n;
+            std::cout << "Inside client commands" << std::endl;
+            n = recv(sock, buffer, sizeof(buffer), MSG_DONTWAIT);
+            if (n == 0) {
+                std::cout << "CLOSE CLIENT" << std::endl;
                 close(sock);
                 FD_CLR(sock, &openSockets);
-                it = clients.erase(it);
+                clients.erase(sock);
             }
-        }
-        else {
-            it++;
+            else {
+                std::cout << "PARSE CLIENT SHIT" << std::endl;
+                parse_client_command(sock, buffer, openSockets);
+            }
         }
     }
 }
 
 void server_commands(fd_set &openSockets, fd_set &readSockets) {
-    std::cout << "SERVERCOMMANDS" << std::endl;
     for(auto const& server : servers) {
         int sock = server.second->sock;
+        if (FD_ISSET(sock, &readSockets)) {
+            std::string str;
+            size_t idx = 0;
+            char buffer[1025] = {0};
+            int n;
+
+            n = recv(sock, buffer, sizeof(buffer), MSG_DONTWAIT);
+
+            if(n == 0){
+                close(sock);
+                FD_CLR(sock, &openSockets);
+                servers.erase(sock);
+            }
+            else {
+                str = buffer;
+
+                if(str[0] != '\x01') {
+                    std::cout << "Wrong format!" << std::endl;
+                    return;
+                }
+
+                int split = 0;
+                for(int i = 1; i < str.length(); i++) {
+                    if(str[i] == '\x04') {
+                        std::string command = str.substr(1, i-1);
+                        parse_server_command(sock, openSockets, command.c_str());
+                    }
+                }
+            }
+        }
+    }
+
+    /*std::cout << "SERVERCOMMANDS" << std::endl;
+    for(auto const& server : servers) {
+        int sock = server.second->sock;
+        std::cout << "inside for loop!" << std::endl;
         if(FD_ISSET(sock, &readSockets)) {
+            std::cout << "inside fd_isset!" << std::endl;
             if(!receive_from_server(sock, openSockets)) {
                 close(sock);
                 FD_CLR(sock, &openSockets);
@@ -340,6 +379,7 @@ void server_commands(fd_set &openSockets, fd_set &readSockets) {
             }
         }
     }
+    */
 }
 
 /* Accept new connection to server */
@@ -380,6 +420,7 @@ void accept_server_connections(int sock, fd_set &activeSockets, fd_set &readSock
             port = std::to_string(serv_addr.sin_port);
             inet_ntop(AF_INET, &(serv_addr.sin_addr), addr, INET_ADDRSTRLEN);
             host = addr;
+            std::cout << "port on new connection: " << port << std::endl;
             servers[serv_sock] = new Server(serv_sock, host, port);
             //send and recv listservers command to get back the group id of the server we just connected to
             std::string list_servers_command = "LISTSERVERS," + SERVER_ID;
