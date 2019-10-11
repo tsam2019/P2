@@ -40,14 +40,14 @@ void listenServer(int serverSocket)
 
        if(nread == 0)                      // Server has dropped us
        {
-          printf("Over and Out\n");
+          printf("Disconnected\n");
           exit(0);
        }
        else if(nread > 0)
        {
           printf("%s\n", buffer);
        }
-       printf("here\n");
+       //printf("here\n");
     }
 }
 
