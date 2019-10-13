@@ -21,7 +21,7 @@
 #include <map>
 #include <vector>
 #include <thread>
-
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -37,6 +37,7 @@ void listenServer(int serverSocket)
     {
        memset(buffer, 0, sizeof(buffer));
        nread = read(serverSocket, buffer, sizeof(buffer));
+       std::string timeAddedString = "";
 
        if(nread == 0)                      // Server has dropped us
        {
@@ -45,7 +46,12 @@ void listenServer(int serverSocket)
        }
        else if(nread > 0)
        {
-          printf("%s\n", buffer);
+            //timestamp
+            std::time_t t = std::time(0);
+            std::tm tm = *std::localtime(&t);
+            std::cout << std::put_time(&tm, "%c") << ": " << buffer << std::endl;
+
+            //printf("%s\n", buffer);
        }
        //printf("here\n");
     }
@@ -111,20 +117,23 @@ int main(int argc, char* argv[])
     // Listen and print replies from server
    std::thread serverThread(listenServer, serverSocket);
 
-   finished = false;
-   while(!finished)
-   {
-       bzero(buffer, sizeof(buffer));
+    finished = false;
+    while(!finished) {
+        bzero(buffer, sizeof(buffer));
 
-       fgets(buffer, sizeof(buffer), stdin);
+        /*
+        std::time_t t = std::time(0);
+        std::tm tm = *std::localtime(&t);
+        std::cout << std::put_time(&tm, "%c") << ": ";
+        */
 
-       nwrite = send(serverSocket, buffer, strlen(buffer),0);
+        fgets(buffer, sizeof(buffer), stdin);
 
-       if(nwrite  == -1)
-       {
-           perror("send() to server failed: ");
-           finished = true;
-       }
+        nwrite = send(serverSocket, buffer, strlen(buffer),0);
 
-   }
+        if(nwrite  == -1) {
+            perror("send() to server failed: ");
+            finished = true;
+        }
+    }
 }
